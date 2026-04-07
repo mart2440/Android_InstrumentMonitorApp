@@ -22,6 +22,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.*
+import androidx.compose.ui.viewinterop.AndroidView
+
+import com.github.mikephil.charting.charts.LineChart
+import com.github.mikephil.charting.data.*
+import com.github.mikephil.charting.components.Description
 
 // ---------------- SESSION ----------------
 
@@ -263,7 +268,7 @@ fun MainScreen(navController: NavHostController) {
 
             when (tab) {
                 "status" -> CurrentStatusScreen()
-                "graphs" -> Text("Graphs")
+                "graphs" -> GraphsScreen()
                 "profiles" -> InstrumentProfilesScreen(navController)
                 "settings" -> SettingsScreen(navController)
             }
@@ -736,6 +741,88 @@ fun AdminConsoleScreen(navController: NavHostController) {
             onClick = { navController.popBackStack("signup", inclusive = false) }
         ) {
             Text("Exit Admin")
+        }
+    }
+}
+
+// ----------- Graph View ------------------
+@Composable
+fun LineChartView(data: List<SensorPoint>) {
+
+    if (data.isEmpty()) {
+        Text("No data available")
+        return
+    }
+
+    AndroidView(
+        factory = { context ->
+
+            val chart = LineChart(context)
+
+            val entries = data.mapIndexed { index, point ->
+                Entry(index.toFloat(), point.temperature)
+            }
+
+            val dataSet = LineDataSet(entries, "Temperature (°F)").apply {
+                lineWidth = 2f
+                setDrawCircles(false)
+            }
+
+            chart.data = LineData(dataSet)
+
+            val desc = Description()
+            desc.text = ""
+            chart.description = desc
+
+            chart.invalidate()
+
+            chart
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(250.dp)
+    )
+}
+
+// ---------------- GraphsScreen ----------------------
+@Composable
+fun GraphsScreen() {
+
+    var data1m by remember { mutableStateOf<List<SensorPoint>>(emptyList()) }
+    var data1h by remember { mutableStateOf<List<SensorPoint>>(emptyList()) }
+    var data1d by remember { mutableStateOf<List<SensorPoint>>(emptyList()) }
+    var data1w by remember { mutableStateOf<List<SensorPoint>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        data1m = AwsRepository.getGraphData("1m.json")
+        data1h = AwsRepository.getGraphData("1h.json")
+        data1d = AwsRepository.getGraphData("1d.json")
+        data1w = AwsRepository.getGraphData("1w.json")
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+
+        item {
+            Text("1 Minute", style = MaterialTheme.typography.titleLarge)
+            LineChartView(data1m)
+        }
+
+        item {
+            Text("1 Hour", style = MaterialTheme.typography.titleLarge)
+            LineChartView(data1h)
+        }
+
+        item {
+            Text("1 Day", style = MaterialTheme.typography.titleLarge)
+            LineChartView(data1d)
+        }
+
+        item {
+            Text("1 Week", style = MaterialTheme.typography.titleLarge)
+            LineChartView(data1w)
         }
     }
 }

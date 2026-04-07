@@ -15,3 +15,9 @@ data class InstrumentProfile(
     val careTips: String,
     val iconRes: Int
 )
+
+data class SensorPoint(
+    val timestamp: String,
+    val temperature: Float,
+    val humidity: Float
+)

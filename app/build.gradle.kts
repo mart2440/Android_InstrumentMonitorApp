@@ -47,4 +47,8 @@ dependencies {
     implementation(libs.core.ktx)
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.core:core:1.12.0")
+
+    // built-in charts for the graph display
+    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
