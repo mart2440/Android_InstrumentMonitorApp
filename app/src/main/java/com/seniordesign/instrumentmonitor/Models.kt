@@ -10,5 +10,8 @@ data class InstrumentProfile(
     val minTemp: Double,
     val maxTemp: Double,
     val minHumidity: Double,
-    val maxHumidity: Double
+    val maxHumidity: Double,
+    val description: String,
+    val careTips: String,
+    val iconRes: Int
 )

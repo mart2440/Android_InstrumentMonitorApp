@@ -16,11 +16,19 @@ class MainActivity : ComponentActivity() {
 
             val navController = rememberNavController()
 
-            NavHost(navController, startDestination = "signup") {
+            NavHost(navController, startDestination = "start") {
+
+                composable("start") { StartScreen(navController) }
 
                 composable("signup") { SignupScreen(navController) }
                 composable("login") { LoginScreen(navController) }
+
                 composable("main") { MainScreen(navController) }
+
+                composable("instrument_detail") { InstrumentDetailScreen() }
+
+                composable("admin_login") { AdminLoginScreen(navController) }
+                composable("admin_console") { AdminConsoleScreen(navController) }
             }
         }
     }

@@ -16,8 +16,12 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Switch
 import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.*
 
 // ---------------- SESSION ----------------
 
@@ -32,6 +36,114 @@ object SessionManager {
     var currentUser: UserSession? = null
     var selectedInstrument: InstrumentProfile? = null
 }
+
+
+// ---------------- START UP SCREEN ----------------------
+@Composable
+fun StartScreen(navController: NavHostController) {
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+
+        Text(
+            text = "Instrument Monitor",
+            style = MaterialTheme.typography.headlineLarge
+        )
+
+        Spacer(Modifier.height(40.dp))
+
+        Button(
+            onClick = { navController.navigate("login") },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Log In")
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        OutlinedButton(
+            onClick = { navController.navigate("signup") },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Create Account")
+        }
+
+        Spacer(Modifier.height(32.dp))
+
+        Text(
+            text = "Admin Access",
+            style = MaterialTheme.typography.labelLarge
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Button(
+            onClick = { navController.navigate("admin_login") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error
+            )
+        ) {
+            Text("Admin Login")
+        }
+    }
+}
+
+// ---------------- ADMIN LOGIN SCREEN --------------------------
+@Composable
+fun AdminLoginScreen(navController: NavHostController) {
+
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+
+        Text("Admin Console", style = MaterialTheme.typography.headlineLarge)
+
+        Spacer(Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = username,
+            onValueChange = { username = it },
+            label = { Text("Admin Username") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("Password") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Button(
+            onClick = {
+                // simple placeholder auth
+                if (username == "admin" && password == "admin") {
+                    navController.navigate("admin_console")
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Enter Admin Console")
+        }
+    }
+}
+
 
 // ---------------- SIGNUP ----------------
 
@@ -152,7 +264,7 @@ fun MainScreen(navController: NavHostController) {
             when (tab) {
                 "status" -> CurrentStatusScreen()
                 "graphs" -> Text("Graphs")
-                "profiles" -> InstrumentProfilesScreen()
+                "profiles" -> InstrumentProfilesScreen(navController)
                 "settings" -> SettingsScreen(navController)
             }
         }
@@ -238,14 +350,78 @@ fun CurrentStatusScreen() {
 
 // ---------------- INSTRUMENT PROFILES ---------
 @Composable
-fun InstrumentProfilesScreen() {
+fun InstrumentProfilesScreen(navController: NavHostController) {
 
-    val instruments = listOf(
-        "Violin" to "High-pitched string instrument used in orchestras and solos.",
-        "Viola" to "Mid-range string instrument, deeper than violin.",
-        "Cello" to "Low warm tone, played seated with endpin.",
-        "Bass" to "Largest string instrument, deepest sound."
-    )
+    val instruments = PresetData.instruments
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+
+        Text(
+            text = "Instrument Profiles",
+            fontSize = 30.sp,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        // GRID
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+
+            items(instruments) { instrument ->
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f),
+                    onClick = {
+                        SessionManager.selectedInstrument = instrument
+                        navController.navigate("instrument_detail")
+                    }
+                ) {
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+
+                        Icon(
+                            painter = painterResource(id = instrument.iconRes),
+                            contentDescription = instrument.name,
+                            modifier = Modifier.size(64.dp)
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        Text(
+                            text = instrument.name,
+                            fontSize = 18.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -------------- INSTRUMENT DETAILS -------------
+@Composable
+fun InstrumentDetailScreen() {
+
+    val instrument = SessionManager.selectedInstrument
+
+    if (instrument == null) {
+        Text("No instrument selected")
+        return
+    }
 
     Column(
         modifier = Modifier
@@ -254,35 +430,31 @@ fun InstrumentProfilesScreen() {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
 
-        Text(
-            text = "Instrument Profiles",
-            fontSize = 30.sp
+        Icon(
+            painter = painterResource(id = instrument.iconRes),
+            contentDescription = instrument.name,
+            modifier = Modifier.size(100.dp)
         )
 
-        instruments.forEach { instrument ->
+        Text(instrument.name, fontSize = 30.sp)
 
-            Card(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+        Text(instrument.description, fontSize = 18.sp)
 
-                    Text(
-                        text = instrument.first,
-                        fontSize = 24.sp
-                    )
+        Divider()
 
-                    Text(
-                        text = instrument.second,
-                        fontSize = 18.sp
-                    )
-                }
-            }
-        }
+        Text("Safe Ranges", fontSize = 22.sp)
+
+        Text("Temperature: ${instrument.minTemp} - ${instrument.maxTemp} °F")
+        Text("Humidity: ${instrument.minHumidity} - ${instrument.maxHumidity} %")
+
+        Divider()
+
+        Text("Care Tips", fontSize = 22.sp)
+
+        Text(instrument.careTips)
     }
 }
+
 
 // --------------- SETTINGS -----------------
 @Composable
@@ -295,96 +467,215 @@ fun SettingsScreen(navController: NavHostController) {
     var email by remember { mutableStateOf(user?.email ?: "") }
 
     var notificationsEnabled by remember { mutableStateOf(true) }
+    var autoSyncEnabled by remember { mutableStateOf(true) }
+    var darkModeEnabled by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+            .padding(16.dp)
     ) {
 
         Text(
             text = "Settings",
-            fontSize = 30.sp
+            style = MaterialTheme.typography.headlineLarge,
+            modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        Spacer(Modifier.height(8.dp))
-
-        Text(
-            text = "Personal Profile",
-            fontSize = 22.sp
-        )
-
-        OutlinedTextField(
-            value = firstName,
-            onValueChange = { firstName = it },
-            label = { Text("First Name") },
-            textStyle = LocalTextStyle.current.copy(fontSize = 18.sp)
-        )
-
-        OutlinedTextField(
-            value = lastName,
-            onValueChange = { lastName = it },
-            label = { Text("Last Name") },
-            textStyle = LocalTextStyle.current.copy(fontSize = 18.sp)
-        )
-
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text("Email") },
-            textStyle = LocalTextStyle.current.copy(fontSize = 18.sp)
-        )
-
-        Spacer(Modifier.height(10.dp))
-
-        Text(
-            text = "Notifications",
-            fontSize = 22.sp
-        )
-
-        Row(
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Text("Enable Alerts", fontSize = 18.sp)
 
-            Spacer(Modifier.weight(1f))
+            // ---------------- PROFILE ----------------
+            item {
+                SettingsSectionHeader("Profile")
+            }
 
-            Switch(
-                checked = notificationsEnabled,
-                onCheckedChange = { notificationsEnabled = it }
-            )
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        Button(
-            onClick = {
-                // Save updated profile locally
-                SessionManager.currentUser = SessionManager.currentUser?.copy(
-                    firstName = firstName,
-                    lastName = lastName,
-                    email = email
+            item {
+                SettingsTextField(
+                    label = "First Name",
+                    value = firstName,
+                    onValueChange = { firstName = it }
                 )
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Save Changes", fontSize = 18.sp)
-        }
+            }
 
-        OutlinedButton(
-            onClick = {
-                // LOG OUT
-                SessionManager.currentUser = null
-                navController.navigate("login") {
-                    popUpTo(0)
+            item {
+                SettingsTextField(
+                    label = "Last Name",
+                    value = lastName,
+                    onValueChange = { lastName = it }
+                )
+            }
+
+            item {
+                SettingsTextField(
+                    label = "Email",
+                    value = email,
+                    onValueChange = { email = it }
+                )
+            }
+
+            // ---------------- MONITORING ----------------
+            item {
+                SettingsSectionHeader("Instrument Monitoring")
+            }
+
+            item {
+                SettingsSwitchRow(
+                    title = "Enable Notifications",
+                    checked = notificationsEnabled,
+                    onCheckedChange = { notificationsEnabled = it }
+                )
+            }
+
+            item {
+                SettingsSwitchRow(
+                    title = "Auto Sync Data",
+                    checked = autoSyncEnabled,
+                    onCheckedChange = { autoSyncEnabled = it }
+                )
+            }
+
+            // ---------------- APPEARANCE ----------------
+            item {
+                SettingsSectionHeader("Appearance")
+            }
+
+            item {
+                SettingsSwitchRow(
+                    title = "Dark Mode",
+                    checked = darkModeEnabled,
+                    onCheckedChange = { darkModeEnabled = it }
+                )
+            }
+
+            // ---------------- DATA / AWS ----------------
+            item {
+                SettingsSectionHeader("Data & Sync")
+            }
+
+            item {
+                SettingsActionRow(
+                    title = "Force Sync Now",
+                    subtitle = "Upload latest sensor data to cloud",
+                    onClick = {
+                        // TODO: AwsRepository.sync()
+                    }
+                )
+            }
+
+            // ---------------- ACCOUNT ----------------
+            item {
+                SettingsSectionHeader("Account")
+            }
+
+            item {
+                Button(
+                    onClick = {
+                        SessionManager.currentUser = SessionManager.currentUser?.copy(
+                            firstName = firstName,
+                            lastName = lastName,
+                            email = email
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Save Changes")
                 }
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Log Out", fontSize = 18.sp)
+            }
+
+            item {
+                OutlinedButton(
+                    onClick = {
+                        SessionManager.currentUser = null
+                        navController.navigate("login") {
+                            popUpTo(0)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Log Out")
+                }
+            }
+
+            item {
+                Spacer(Modifier.height(40.dp))
+            }
         }
     }
+}
+
+// -------------- SECTION HEADER (SSETTINGS) ------------
+@Composable
+fun SettingsSectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(vertical = 8.dp)
+    )
+}
+
+// -------------- SWITCH ROW (SETTINGS) -------------
+@Composable
+fun SettingsSwitchRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, modifier = Modifier.weight(1f))
+
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
+// ----- FORCE SYNC IN SETTINGS -----------
+@Composable
+fun SettingsActionRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp)
+    ) {
+        TextButton(onClick = onClick) {
+            Column {
+                Text(title)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+// --------------- SETTINGS TEXT FIELDS ---------
+@Composable
+fun SettingsTextField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        modifier = Modifier.fillMaxWidth()
+    )
 }
 
 // ---------------- DROPDOWN ----------------
@@ -416,6 +707,35 @@ fun InstrumentDropdown(
                     }
                 )
             }
+        }
+    }
+}
+
+// ------------------ ADMIN CONSOLE SCREEN -----------------------
+@Composable
+fun AdminConsoleScreen(navController: NavHostController) {
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+    ) {
+
+        Text("Admin Dashboard", style = MaterialTheme.typography.headlineLarge)
+
+        Spacer(Modifier.height(20.dp))
+
+        Text("• System status overview")
+        Text("• User management")
+        Text("• Sensor data logs")
+        Text("• AWS sync controls")
+
+        Spacer(Modifier.height(20.dp))
+
+        Button(
+            onClick = { navController.popBackStack("signup", inclusive = false) }
+        ) {
+            Text("Exit Admin")
         }
     }
 }
