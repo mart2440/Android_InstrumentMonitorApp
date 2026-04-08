@@ -27,6 +27,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.github.mikephil.charting.charts.LineChart
 import com.github.mikephil.charting.data.*
 import com.github.mikephil.charting.components.Description
+import com.github.mikephil.charting.components.YAxis
+import com.github.mikephil.charting.interfaces.datasets.ILineDataSet
 
 // ---------------- SESSION ----------------
 
@@ -747,7 +749,10 @@ fun AdminConsoleScreen(navController: NavHostController) {
 
 // ----------- Graph View ------------------
 @Composable
-fun LineChartView(data: List<SensorPoint>) {
+fun LineChartView(
+    data: List<SensorPoint>,
+    mode: String
+) {
 
     if (data.isEmpty()) {
         Text("No data available")
@@ -757,30 +762,101 @@ fun LineChartView(data: List<SensorPoint>) {
     AndroidView(
         factory = { context ->
 
-            val chart = LineChart(context)
-
-            val entries = data.mapIndexed { index, point ->
-                Entry(index.toFloat(), point.temperature)
+            LineChart(context).apply {
+                description.isEnabled = false
+                setTouchEnabled(true)
+                setPinchZoom(true)
             }
-
-            val dataSet = LineDataSet(entries, "Temperature (°F)").apply {
-                lineWidth = 2f
-                setDrawCircles(false)
-            }
-
-            chart.data = LineData(dataSet)
-
-            val desc = Description()
-            desc.text = ""
-            chart.description = desc
-
-            chart.invalidate()
-
-            chart
         },
+
+        update = { chart ->
+
+            // --------------------------------------------------
+            // ✅ STEP 1: EXTRACT VALUES (PUT AT TOP OF UPDATE)
+            // --------------------------------------------------
+            val tempValues = data.map { it.temperature }
+            val humidityValues = data.map { it.humidity }
+
+            val tempMin = tempValues.minOrNull() ?: 0f
+            val tempMax = tempValues.maxOrNull() ?: 100f
+
+            val humMin = humidityValues.minOrNull() ?: 0f
+            val humMax = humidityValues.maxOrNull() ?: 100f
+
+            // --------------------------------------------------
+            // ✅ STEP 2: CREATE ENTRIES
+            // --------------------------------------------------
+            val tempEntries = data.mapIndexed { i, p ->
+                Entry(i.toFloat(), p.temperature)
+            }
+
+            val humidityEntries = data.mapIndexed { i, p ->
+                Entry(i.toFloat(), p.humidity)
+            }
+
+            // --------------------------------------------------
+            // ✅ STEP 3: DATASETS (WITH AXIS ASSIGNMENT)
+            // --------------------------------------------------
+            val dataSets = mutableListOf<ILineDataSet>()
+
+            if (mode == "temp" || mode == "both") {
+                val tempSet = LineDataSet(tempEntries, "Temperature (°F)").apply {
+                    color = android.graphics.Color.RED
+                    lineWidth = 2f
+                    setDrawCircles(false)
+
+                    // LEFT AXIS
+                    axisDependency = YAxis.AxisDependency.LEFT
+                }
+                dataSets.add(tempSet)
+            }
+
+            if (mode == "humidity" || mode == "both") {
+                val humSet = LineDataSet(humidityEntries, "Humidity (%)").apply {
+                    color = android.graphics.Color.BLUE
+                    lineWidth = 2f
+                    setDrawCircles(false)
+
+                    // RIGHT AXIS
+                    axisDependency = YAxis.AxisDependency.RIGHT
+                }
+                dataSets.add(humSet)
+            }
+
+            // --------------------------------------------------
+            // ✅ STEP 4: ASSIGN DATA
+            // --------------------------------------------------
+            chart.data = LineData(dataSets)
+
+            // --------------------------------------------------
+            // ✅ STEP 5: AXIS SCALING (THIS FIXES YOUR ISSUE)
+            // --------------------------------------------------
+
+            chart.axisLeft.apply {
+                axisMinimum = (tempMin - 2).coerceAtLeast(0f)
+                axisMaximum = tempMax + 2
+                setDrawGridLines(true)
+            }
+
+            chart.axisRight.apply {
+                axisMinimum = (humMin - 2).coerceAtLeast(0f)
+                axisMaximum = humMax + 2
+                setDrawGridLines(false)
+            }
+
+            // --------------------------------------------------
+            // ✅ STEP 6: GENERAL CHART BEHAVIOR
+            // --------------------------------------------------
+            chart.axisLeft.isEnabled = true
+            chart.axisRight.isEnabled = true
+
+            chart.setExtraOffsets(10f, 10f, 10f, 10f)
+            chart.invalidate()
+        },
+
         modifier = Modifier
             .fillMaxWidth()
-            .height(250.dp)
+            .height(280.dp)
     )
 }
 
@@ -793,6 +869,8 @@ fun GraphsScreen() {
     var data1d by remember { mutableStateOf<List<SensorPoint>>(emptyList()) }
     var data1w by remember { mutableStateOf<List<SensorPoint>>(emptyList()) }
 
+    var mode by remember { mutableStateOf("both") }
+
     LaunchedEffect(Unit) {
         data1m = AwsRepository.getGraphData("1m.json")
         data1h = AwsRepository.getGraphData("1h.json")
@@ -800,29 +878,48 @@ fun GraphsScreen() {
         data1w = AwsRepository.getGraphData("1w.json")
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+    Column(
+        modifier = Modifier.fillMaxSize()
     ) {
 
-        item {
-            Text("1 Minute", style = MaterialTheme.typography.titleLarge)
-            LineChartView(data1m)
+        // 🔘 TOGGLE BUTTONS (TOP FIXED AREA)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Button(onClick = { mode = "temp" }) { Text("Temp") }
+            Button(onClick = { mode = "humidity" }) { Text("Humidity") }
+            Button(onClick = { mode = "both" }) { Text("Both") }
         }
 
-        item {
-            Text("1 Hour", style = MaterialTheme.typography.titleLarge)
-            LineChartView(data1h)
-        }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
 
-        item {
-            Text("1 Day", style = MaterialTheme.typography.titleLarge)
-            LineChartView(data1d)
-        }
+            item {
+                Text("1 Minute", style = MaterialTheme.typography.titleLarge)
+                LineChartView(data1m, mode)
+            }
 
-        item {
-            Text("1 Week", style = MaterialTheme.typography.titleLarge)
-            LineChartView(data1w)
+            item {
+                Text("1 Hour", style = MaterialTheme.typography.titleLarge)
+                LineChartView(data1h, mode)
+            }
+
+            item {
+                Text("1 Day", style = MaterialTheme.typography.titleLarge)
+                LineChartView(data1d, mode)
+            }
+
+            item {
+                Text("1 Week", style = MaterialTheme.typography.titleLarge)
+                LineChartView(data1w, mode)
+            }
         }
     }
 }
