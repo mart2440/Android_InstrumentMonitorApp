@@ -30,6 +30,15 @@ import com.github.mikephil.charting.components.Description
 import com.github.mikephil.charting.components.YAxis
 import com.github.mikephil.charting.interfaces.datasets.ILineDataSet
 
+import com.github.mikephil.charting.formatter.ValueFormatter
+import java.time.Instant
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import com.github.mikephil.charting.data.Entry
+import com.github.mikephil.charting.data.LineData
+import com.github.mikephil.charting.data.LineDataSet
+
 // ---------------- SESSION ----------------
 
 data class UserSession(
@@ -748,6 +757,13 @@ fun AdminConsoleScreen(navController: NavHostController) {
 }
 
 // ----------- Graph View ------------------
+// --------------------------------------------------
+// ✅ HELPER: convert ISO timestamp → millis
+// --------------------------------------------------
+fun parseTimestampToMillis(timestamp: String): Long {
+    return Instant.parse(timestamp).toEpochMilli()
+}
+
 @Composable
 fun LineChartView(
     data: List<SensorPoint>,
@@ -761,7 +777,6 @@ fun LineChartView(
 
     AndroidView(
         factory = { context ->
-
             LineChart(context).apply {
                 description.isEnabled = false
                 setTouchEnabled(true)
@@ -772,30 +787,31 @@ fun LineChartView(
         update = { chart ->
 
             // --------------------------------------------------
-            // ✅ STEP 1: EXTRACT VALUES (PUT AT TOP OF UPDATE)
+            // ✅ BASE TIME (for relative X-axis scaling)
             // --------------------------------------------------
-            val tempValues = data.map { it.temperature }
-            val humidityValues = data.map { it.humidity }
+            val baseTime = parseTimestampToMillis(data.first().timestamp)
 
-            val tempMin = tempValues.minOrNull() ?: 0f
-            val tempMax = tempValues.maxOrNull() ?: 100f
-
-            val humMin = humidityValues.minOrNull() ?: 0f
-            val humMax = humidityValues.maxOrNull() ?: 100f
+            val dateFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 
             // --------------------------------------------------
-            // ✅ STEP 2: CREATE ENTRIES
+            // ✅ ENTRIES (REAL TIME X-AXIS)
             // --------------------------------------------------
-            val tempEntries = data.mapIndexed { i, p ->
-                Entry(i.toFloat(), p.temperature)
+            val tempEntries = data.map { p ->
+                Entry(
+                    (parseTimestampToMillis(p.timestamp) - baseTime).toFloat(),
+                    p.temperature
+                )
             }
 
-            val humidityEntries = data.mapIndexed { i, p ->
-                Entry(i.toFloat(), p.humidity)
+            val humidityEntries = data.map { p ->
+                Entry(
+                    (parseTimestampToMillis(p.timestamp) - baseTime).toFloat(),
+                    p.humidity
+                )
             }
 
             // --------------------------------------------------
-            // ✅ STEP 3: DATASETS (WITH AXIS ASSIGNMENT)
+            // ✅ DATASETS
             // --------------------------------------------------
             val dataSets = mutableListOf<ILineDataSet>()
 
@@ -804,8 +820,6 @@ fun LineChartView(
                     color = android.graphics.Color.RED
                     lineWidth = 2f
                     setDrawCircles(false)
-
-                    // LEFT AXIS
                     axisDependency = YAxis.AxisDependency.LEFT
                 }
                 dataSets.add(tempSet)
@@ -816,41 +830,54 @@ fun LineChartView(
                     color = android.graphics.Color.BLUE
                     lineWidth = 2f
                     setDrawCircles(false)
-
-                    // RIGHT AXIS
                     axisDependency = YAxis.AxisDependency.RIGHT
                 }
                 dataSets.add(humSet)
             }
 
-            // --------------------------------------------------
-            // ✅ STEP 4: ASSIGN DATA
-            // --------------------------------------------------
             chart.data = LineData(dataSets)
 
             // --------------------------------------------------
-            // ✅ STEP 5: AXIS SCALING (THIS FIXES YOUR ISSUE)
+            // ✅ Y-AXIS SCALING
             // --------------------------------------------------
+            val tempMin = data.minOf { it.temperature }
+            val tempMax = data.maxOf { it.temperature }
+
+            val humMin = data.minOf { it.humidity }
+            val humMax = data.maxOf { it.humidity }
 
             chart.axisLeft.apply {
                 axisMinimum = (tempMin - 2).coerceAtLeast(0f)
                 axisMaximum = tempMax + 2
-                setDrawGridLines(true)
             }
 
             chart.axisRight.apply {
                 axisMinimum = (humMin - 2).coerceAtLeast(0f)
                 axisMaximum = humMax + 2
-                setDrawGridLines(false)
             }
 
             // --------------------------------------------------
-            // ✅ STEP 6: GENERAL CHART BEHAVIOR
+            // ✅ X-AXIS (REAL TIMESTAMP FORMATTER)
+            // --------------------------------------------------
+            chart.xAxis.apply {
+                granularity = 1f
+                setDrawGridLines(false)
+                labelRotationAngle = -45f
+
+                valueFormatter = object : ValueFormatter() {
+                    override fun getFormattedValue(value: Float): String {
+                        val actualTime = baseTime + value.toLong()
+                        return dateFormat.format(Date(actualTime))
+                    }
+                }
+            }
+
+            // --------------------------------------------------
+            // ✅ FINAL SETTINGS
             // --------------------------------------------------
             chart.axisLeft.isEnabled = true
             chart.axisRight.isEnabled = true
 
-            chart.setExtraOffsets(10f, 10f, 10f, 10f)
             chart.invalidate()
         },
 
