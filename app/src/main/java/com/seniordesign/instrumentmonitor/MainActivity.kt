@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.navigation.compose.*
+import androidx.compose.ui.platform.LocalContext
 
 class MainActivity : ComponentActivity() {
 
@@ -15,10 +16,11 @@ class MainActivity : ComponentActivity() {
         setContent {
 
             val navController = rememberNavController()
+            val context = LocalContext.current
 
             NavHost(navController, startDestination = "start") {
 
-                composable("start") { StartScreen(navController) }
+                composable("start") { StartScreen(navController, context) }
 
                 composable("signup") { SignupScreen(navController) }
                 composable("login") { LoginScreen(navController) }
@@ -29,6 +31,7 @@ class MainActivity : ComponentActivity() {
 
                 composable("admin_login") { AdminLoginScreen(navController) }
                 composable("admin_console") { AdminConsoleScreen(navController) }
+                composable("forgot_password") { ForgotPasswordScreen(navController) }
             }
         }
     }

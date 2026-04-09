@@ -40,6 +40,7 @@ import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import com.github.mikephil.charting.components.LimitLine
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import android.content.Context
 
 // ---------------- SESSION ----------------
 
@@ -58,7 +59,7 @@ object SessionManager {
 
 // ---------------- START UP SCREEN ----------------------
 @Composable
-fun StartScreen(navController: NavHostController) {
+fun StartScreen(navController: NavHostController, context: Context) {
 
     Column(
         modifier = Modifier
@@ -99,6 +100,17 @@ fun StartScreen(navController: NavHostController) {
         )
 
         Spacer(Modifier.height(12.dp))
+
+        LaunchedEffect(Unit) {
+            val savedUser = SessionStorage.loadSession(context)
+
+            if (savedUser != null) {
+                SessionManager.currentUser = savedUser
+                navController.navigate("main") {
+                    popUpTo("start") { inclusive = true }
+                }
+            }
+        }
 
         Button(
             onClick = { navController.navigate("admin_login") },
@@ -211,6 +223,32 @@ fun SignupScreen(navController: NavHostController) {
     }
 }
 
+// --------------- STATUS BANNER --------------------------
+@Composable
+fun LiveDataStatusBanner() {
+    val status = DataStatus.lastStatus
+    val error = DataStatus.lastError
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+
+            Text(
+                text = "Data Status: $status"
+            )
+
+            if (error != null) {
+                Text(
+                    text = "Error: $error",
+                    color = Color.Red
+                )
+            }
+        }
+    }
+}
+
 // ---------------- LOGIN ----------------
 
 @Composable
@@ -219,6 +257,7 @@ fun LoginScreen(navController: NavHostController) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var rememberMe by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -266,12 +305,14 @@ fun LoginScreen(navController: NavHostController) {
         // FORGOT PASSWORD
         TextButton(
             onClick = {
-                // TODO: hook to email reset (Firebase or backend later)
+                navController.navigate("forgot_password")
             },
             modifier = Modifier.align(Alignment.End)
         ) {
             Text("Forgot Password?")
         }
+
+
 
         Spacer(Modifier.height(8.dp))
 
@@ -293,12 +334,17 @@ fun LoginScreen(navController: NavHostController) {
                     return@Button
                 }
 
-                // TEMP SIMPLE LOGIN (replace with AWS/Firebase later)
-                SessionManager.currentUser = UserSession(
+                val user = UserSession(
                     firstName = "User",
                     lastName = "",
                     email = email
                 )
+
+                SessionManager.currentUser = user
+
+                if (rememberMe) {
+                    SessionStorage.saveSession(navController.context, user)
+                }
 
                 navController.navigate("main") {
                     popUpTo("login") { inclusive = true }
@@ -1058,6 +1104,56 @@ fun GraphsScreen() {
                 Text("1 Week", style = MaterialTheme.typography.titleLarge)
                 LineChartView(data1w, mode)
             }
+        }
+    }
+}
+
+// ------------------------- FORGOT PASSWORD ----------------------------
+@Composable
+fun ForgotPasswordScreen(navController: NavHostController) {
+
+    var email by remember { mutableStateOf("") }
+    var sent by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+
+        Text("Reset Password", style = MaterialTheme.typography.headlineLarge)
+
+        Spacer(Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = email,
+            onValueChange = { email = it },
+            label = { Text("Enter email") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Button(
+            onClick = {
+                sent = true
+                // TODO: hook AWS Cognito / Firebase email reset here
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Send Reset Link")
+        }
+
+        if (sent) {
+            Spacer(Modifier.height(12.dp))
+            Text("If this email exists, a reset link has been sent.")
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        TextButton(
+            onClick = { navController.popBackStack() }
+        ) {
+            Text("Back to Login")
         }
     }
 }
