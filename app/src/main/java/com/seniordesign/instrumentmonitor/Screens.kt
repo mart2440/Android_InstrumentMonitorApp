@@ -38,6 +38,8 @@ import java.util.Locale
 import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
+import com.github.mikephil.charting.components.LimitLine
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 
 // ---------------- SESSION ----------------
 
@@ -214,20 +216,106 @@ fun SignupScreen(navController: NavHostController) {
 @Composable
 fun LoginScreen(navController: NavHostController) {
 
-    Column(Modifier.fillMaxSize().padding(24.dp)) {
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
 
-        Text("Login", style = MaterialTheme.typography.headlineLarge)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+
+        Text(
+            text = "Login",
+            style = MaterialTheme.typography.headlineLarge
+        )
 
         Spacer(Modifier.height(16.dp))
 
+        // EMAIL
+        OutlinedTextField(
+            value = email,
+            onValueChange = {
+                email = it
+                error = null
+            },
+            label = { Text("Email") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // PASSWORD
+        OutlinedTextField(
+            value = password,
+            onValueChange = {
+                password = it
+                error = null
+            },
+            label = { Text("Password") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation()
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        // FORGOT PASSWORD
+        TextButton(
+            onClick = {
+                // TODO: hook to email reset (Firebase or backend later)
+            },
+            modifier = Modifier.align(Alignment.End)
+        ) {
+            Text("Forgot Password?")
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // ERROR TEXT
+        if (error != null) {
+            Text(
+                text = error!!,
+                color = MaterialTheme.colorScheme.error
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+
+        // LOGIN BUTTON
         Button(
-            onClick = { navController.navigate("main") },
+            onClick = {
+
+                if (email.isBlank() || password.isBlank()) {
+                    error = "Please enter email and password"
+                    return@Button
+                }
+
+                // TEMP SIMPLE LOGIN (replace with AWS/Firebase later)
+                SessionManager.currentUser = UserSession(
+                    firstName = "User",
+                    lastName = "",
+                    email = email
+                )
+
+                navController.navigate("main") {
+                    popUpTo("login") { inclusive = true }
+                }
+            },
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Login")
         }
 
-        TextButton(onClick = { navController.navigate("signup") }) {
+        Spacer(Modifier.height(12.dp))
+
+        // NAV TO SIGNUP
+        TextButton(
+            onClick = { navController.navigate("signup") },
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        ) {
             Text("Create Account")
         }
     }
@@ -757,9 +845,7 @@ fun AdminConsoleScreen(navController: NavHostController) {
 }
 
 // ----------- Graph View ------------------
-// --------------------------------------------------
-// ✅ HELPER: convert ISO timestamp → millis
-// --------------------------------------------------
+// function for index to timestamp conversion
 fun parseTimestampToMillis(timestamp: String): Long {
     return Instant.parse(timestamp).toEpochMilli()
 }
@@ -786,16 +872,12 @@ fun LineChartView(
 
         update = { chart ->
 
-            // --------------------------------------------------
-            // ✅ BASE TIME (for relative X-axis scaling)
-            // --------------------------------------------------
+            // baseline for Time on graphs
             val baseTime = parseTimestampToMillis(data.first().timestamp)
 
             val dateFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 
-            // --------------------------------------------------
-            // ✅ ENTRIES (REAL TIME X-AXIS)
-            // --------------------------------------------------
+            // Entries for the x-axis data
             val tempEntries = data.map { p ->
                 Entry(
                     (parseTimestampToMillis(p.timestamp) - baseTime).toFloat(),
@@ -810,9 +892,7 @@ fun LineChartView(
                 )
             }
 
-            // --------------------------------------------------
-            // ✅ DATASETS
-            // --------------------------------------------------
+            // Datasets for graphical view of temp, humidity, or both
             val dataSets = mutableListOf<ILineDataSet>()
 
             if (mode == "temp" || mode == "both") {
@@ -837,9 +917,8 @@ fun LineChartView(
 
             chart.data = LineData(dataSets)
 
-            // --------------------------------------------------
-            // ✅ Y-AXIS SCALING
-            // --------------------------------------------------
+            // Scaling done for the y-axis
+            // Reduces garbled data of mixed temp and humidity
             val tempMin = data.minOf { it.temperature }
             val tempMax = data.maxOf { it.temperature }
 
@@ -849,16 +928,50 @@ fun LineChartView(
             chart.axisLeft.apply {
                 axisMinimum = (tempMin - 2).coerceAtLeast(0f)
                 axisMaximum = tempMax + 2
+                setDrawLimitLinesBehindData(true)
             }
 
             chart.axisRight.apply {
                 axisMinimum = (humMin - 2).coerceAtLeast(0f)
                 axisMaximum = humMax + 2
+                setDrawLimitLinesBehindData(true)
             }
 
-            // --------------------------------------------------
-            // ✅ X-AXIS (REAL TIMESTAMP FORMATTER)
-            // --------------------------------------------------
+            // Shaded danger zones for temperature
+            chart.axisLeft.removeAllLimitLines()
+
+            chart.axisLeft.addLimitLine(
+                LimitLine(68f).apply {
+                    lineColor = android.graphics.Color.parseColor("#3300FF00") // green zone start
+                    lineWidth = 15f
+                }
+            )
+
+            chart.axisLeft.addLimitLine(
+                LimitLine(78f).apply {
+                    lineColor = android.graphics.Color.parseColor("#33FF0000") // red zone start
+                    lineWidth = 15f
+                }
+            )
+
+            // Shaded danger zones for humidity
+            chart.axisRight.removeAllLimitLines()
+
+            chart.axisRight.addLimitLine(
+                LimitLine(40f).apply {
+                    lineColor = android.graphics.Color.parseColor("#3300FF00")
+                    lineWidth = 15f
+                }
+            )
+
+            chart.axisRight.addLimitLine(
+                LimitLine(55f).apply {
+                    lineColor = android.graphics.Color.parseColor("#33FF0000")
+                    lineWidth = 15f
+                }
+            )
+
+            // x-axis with real time labels
             chart.xAxis.apply {
                 granularity = 1f
                 setDrawGridLines(false)
@@ -872,9 +985,7 @@ fun LineChartView(
                 }
             }
 
-            // --------------------------------------------------
-            // ✅ FINAL SETTINGS
-            // --------------------------------------------------
+            // Final settings for graph view
             chart.axisLeft.isEnabled = true
             chart.axisRight.isEnabled = true
 
@@ -909,7 +1020,7 @@ fun GraphsScreen() {
         modifier = Modifier.fillMaxSize()
     ) {
 
-        // 🔘 TOGGLE BUTTONS (TOP FIXED AREA)
+        // Toggle buttons for graph view
         Row(
             modifier = Modifier
                 .fillMaxWidth()
