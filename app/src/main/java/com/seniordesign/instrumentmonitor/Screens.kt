@@ -41,6 +41,11 @@ import com.github.mikephil.charting.data.LineDataSet
 import com.github.mikephil.charting.components.LimitLine
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import android.content.Context
+import androidx.compose.runtime.toMutableStateList
+import java.util.UUID
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 // ---------------- SESSION ----------------
 
@@ -48,7 +53,8 @@ data class UserSession(
     val firstName: String,
     val lastName: String,
     val email: String,
-    val instrument: String = "None"
+    val instrument: String = "None",
+    val role: String = "student"
 )
 
 object SessionManager {
@@ -106,8 +112,15 @@ fun StartScreen(navController: NavHostController, context: Context) {
 
             if (savedUser != null) {
                 SessionManager.currentUser = savedUser
-                navController.navigate("main") {
-                    popUpTo("start") { inclusive = true }
+
+                if (savedUser.role == "admin") {
+                    navController.navigate("admin_console") {
+                        popUpTo("start") { inclusive = true }
+                    }
+                } else {
+                    navController.navigate("main") {
+                        popUpTo("start") { inclusive = true }
+                    }
                 }
             }
         }
@@ -162,9 +175,18 @@ fun AdminLoginScreen(navController: NavHostController) {
 
         Button(
             onClick = {
-                // simple placeholder auth
                 if (username == "admin" && password == "admin") {
-                    navController.navigate("admin_console")
+
+                    SessionManager.currentUser = UserSession(
+                        firstName = "Admin",
+                        lastName = "",
+                        email = "admin@system",
+                        role = "admin" // 👈 IMPORTANT
+                    )
+
+                    navController.navigate("admin_console") {
+                        popUpTo("start") { inclusive = true }
+                    }
                 }
             },
             modifier = Modifier.fillMaxWidth()
@@ -337,7 +359,8 @@ fun LoginScreen(navController: NavHostController) {
                 val user = UserSession(
                     firstName = "User",
                     lastName = "",
-                    email = email
+                    email = email,
+                    role = "student"
                 )
 
                 SessionManager.currentUser = user
@@ -865,29 +888,207 @@ fun InstrumentDropdown(
 @Composable
 fun AdminConsoleScreen(navController: NavHostController) {
 
+    val context = LocalContext.current
+
+    var classroom by remember {
+        mutableStateOf(
+            SessionStorage.loadClassroom(context) ?: Classroom(
+                id = System.currentTimeMillis().toString(),
+                name = "Music Class",
+                joinCode = SessionStorage.generateJoinCode()
+            )
+        )
+    }
+
+    var students by remember {
+        mutableStateOf(
+            SessionStorage.loadStudents(context)
+                .filter { it.classroomCode == classroom.joinCode }
+        )
+    }
+
+    var showDialog by remember { mutableStateOf(false) }
+
+    // reload students when classroom changes
+    LaunchedEffect(classroom.joinCode) {
+        students = SessionStorage.loadStudents(context)
+            .filter { it.classroomCode == classroom.joinCode }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
 
-        Text("Admin Dashboard", style = MaterialTheme.typography.headlineLarge)
+        // TITLE
+        Text(
+            text = "Admin Dashboard",
+            style = MaterialTheme.typography.headlineLarge
+        )
 
-        Spacer(Modifier.height(20.dp))
+        // ---------------- CLASSROOM CARD ----------------
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
 
-        Text("• System status overview")
-        Text("• User management")
-        Text("• Sensor data logs")
-        Text("• AWS sync controls")
+                Text("Classroom Code", style = MaterialTheme.typography.titleMedium)
 
-        Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(8.dp))
 
+                Text(
+                    text = classroom.joinCode,
+                    style = MaterialTheme.typography.headlineMedium
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Button(
+                    onClick = {
+                        val newCode = SessionStorage.generateJoinCode()
+                        classroom = classroom.copy(joinCode = newCode)
+                        SessionStorage.saveClassroom(context, classroom)
+                        students = emptyList()
+                    }
+                ) {
+                    Text("Generate New Code")
+                }
+            }
+        }
+
+        // ---------------- ADD STUDENT BUTTON ----------------
         Button(
-            onClick = { navController.popBackStack("signup", inclusive = false) }
+            onClick = { showDialog = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Add Student")
+        }
+
+        // ---------------- OVERVIEW CARD ----------------
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+
+                Text("Overview", style = MaterialTheme.typography.titleMedium)
+
+                Spacer(Modifier.height(8.dp))
+
+                Text("Students: ${students.size}")
+            }
+        }
+
+        // ---------------- STUDENT LIST ----------------
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(students) { student ->
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+
+                        Text(student.name, style = MaterialTheme.typography.titleMedium)
+
+                        Text("Instrument: ${student.instrument}")
+
+                        Text(
+                            text = "ID: ${student.id.take(6)}",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+            }
+        }
+
+        // ---------------- EXIT ----------------
+        Button(
+            onClick = {
+                SessionManager.currentUser = null
+                navController.navigate("start") {
+                    popUpTo(0)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
         ) {
             Text("Exit Admin")
         }
     }
+
+    // ---------------- ADD STUDENT DIALOG ----------------
+    if (showDialog) {
+        AddStudentDialog(
+            onDismiss = { showDialog = false },
+            onAdd = { student ->
+
+                val newStudent = student.copy(
+                    classroomCode = classroom.joinCode
+                )
+
+                students = students + newStudent
+                SessionStorage.saveStudents(context, students)
+
+                showDialog = false
+            }
+        )
+    }
+}
+
+// ----------- Add Students to Admin Console View -----------------------
+@Composable
+fun AddStudentDialog(
+    onDismiss: () -> Unit,
+    onAdd: (Student) -> Unit
+) {
+
+    var name by remember { mutableStateOf("") }
+    var instrument by remember { mutableStateOf("Violin") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        onAdd(
+                            Student(
+                                id = UUID.randomUUID().toString(),
+                                name = name,
+                                instrument = instrument,
+                                classroomCode = ""
+                            )
+                        )
+                    }
+                }
+            ) {
+                Text("Add")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        title = { Text("Add Student") },
+        text = {
+
+            Column {
+
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Student Name") }
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                // SIMPLE INSTRUMENT DROPDOWN
+                InstrumentDropdown { selected ->
+                    instrument = selected.name
+                }
+            }
+        }
+    )
 }
 
 // ----------- Graph View ------------------

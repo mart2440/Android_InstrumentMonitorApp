@@ -21,3 +21,19 @@ data class SensorPoint(
     val temperature: Float,
     val humidity: Float
 )
+
+data class Classroom(
+    val id: String,
+    val name: String,
+    val joinCode: String
+)
+
+data class Student(
+    val id: String,
+    val name: String,
+    val instrument: String,
+    val classroomCode: String
+)
+
+
+
