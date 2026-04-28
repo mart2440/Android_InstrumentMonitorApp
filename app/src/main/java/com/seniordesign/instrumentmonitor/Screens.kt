@@ -451,29 +451,74 @@ fun CurrentStatusScreen() {
 
     val user = SessionManager.currentUser
 
-    var temp by remember { mutableStateOf(70.0) }
-    var humidity by remember { mutableStateOf(50.0) }
+    var temp by remember { mutableStateOf(0.0) }
+    var humidity by remember { mutableStateOf(0.0) }
+    var battery by remember { mutableStateOf(0.0) }
+    var mode by remember { mutableStateOf("unknown") }
 
     var selectedInstrument by remember {
         mutableStateOf<InstrumentProfile?>(SessionManager.selectedInstrument)
     }
 
-    var isSafe by remember { mutableStateOf(true) }
+    // Remembers user's instrument selection
+    var instrumentRequired by remember { mutableStateOf(selectedInstrument == null) }
 
+    var isSafe by remember { mutableStateOf(true) }
+    var isConnected by remember { mutableStateOf(true) }
+
+    var lastUpdatedTime by remember { mutableStateOf(System.currentTimeMillis()) }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    val safeColor = if (isSafe) Color(0xFF4CAF50) else Color(0xFFF44336)
+
+    val batteryColor = when {
+        battery >= 3.8 -> Color(0xFF4CAF50)
+        battery >= 3.5 -> Color(0xFFFFC107)
+        else -> Color(0xFFF44336)
+    }
+
+    fun timeAgo(lastTime: Long): String {
+        val seconds = (now - lastTime) / 1000
+        return when {
+            seconds < 60 -> "$seconds sec ago"
+            else -> "${seconds / 60} min ago"
+        }
+    }
+
+    // LIVE CLOCK (fixes frozen "0 seconds ago")
     LaunchedEffect(Unit) {
         while (true) {
+            now = System.currentTimeMillis()
+            delay(1000)
+        }
+    }
 
-            val data = AwsRepository.getSensorData()
-            temp = data.temperature
-            humidity = data.humidity
+    // AWS POLLING LOOP
+    LaunchedEffect(Unit) {
+        while (true) {
+            try {
+                val data = AwsRepository.getLatestSensorData()
 
-            selectedInstrument?.let { instrument ->
-                isSafe =
+                temp = data.temperature
+                humidity = data.humidity
+                battery = data.battery
+                mode = data.mode
+
+                isConnected = true
+                lastUpdatedTime = System.currentTimeMillis()
+
+                isSafe = selectedInstrument?.let { instrument ->
                     temp in instrument.minTemp..instrument.maxTemp &&
                             humidity in instrument.minHumidity..instrument.maxHumidity
+                } ?: false
+
+                instrumentRequired = selectedInstrument == null
+
+            } catch (e: Exception) {
+                isConnected = false
             }
 
-            delay(4000)
+            delay(3000)
         }
     }
 
@@ -481,34 +526,113 @@ fun CurrentStatusScreen() {
         Modifier
             .fillMaxSize()
             .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
 
         Text("Welcome ${user?.firstName ?: "User"}", fontSize = 28.sp)
 
-        // 🔴🟢 STATUS BANNER
+        // ---------------- SAFETY BANNER ----------------
+        val bannerColor = when {
+            instrumentRequired -> Color(0xFF607D8B) // gray-blue
+            isSafe -> Color(0xFF4CAF50)
+            else -> Color(0xFFF44336)
+        }
+
+        val bannerText = when {
+            instrumentRequired -> "Select an instrument to begin"
+            isSafe -> "Instrument Safe"
+            else -> "WARNING: Unsafe Conditions!"
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(60.dp)
                 .padding(vertical = 8.dp)
-                .background(
-                    if (isSafe) Color(0xFF4CAF50) else Color(0xFFF44336)
-                ),
+                .background(bannerColor),
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = if (isSafe) "Instrument Safe" else "WARNING: Unsafe Conditions!",
+                text = bannerText,
                 color = Color.White,
-                fontSize = 20.sp
+                fontSize = 18.sp
             )
         }
 
+        // ---------------- CONNECTION ----------------
+        Text(
+            text = if (isConnected) "AWS Connected" else "Offline",
+            color = if (isConnected) Color(0xFF4CAF50) else Color.Red
+        )
+
+        // ---------------- LAST UPDATED ----------------
+        Text(
+            text = "Last updated: ${timeAgo(lastUpdatedTime)}",
+            color = Color.Gray
+        )
+
+        if (selectedInstrument == null) {
+            Text(
+                text = "⚠ Please select an instrument profile to enable monitoring",
+                color = Color.Red
+            )
+        }
+
+        // ---------------- SENSOR DATA ----------------
         Text("Temperature: ${"%.1f".format(temp)} °F", fontSize = 24.sp)
         Text("Humidity: ${"%.1f".format(humidity)} %", fontSize = 24.sp)
 
+        Text(
+            text = "Battery: ${"%.2f".format(battery)} V",
+            fontSize = 20.sp,
+            color = batteryColor
+        )
+
+        // ---------------- MODE CHIPS ----------------
+        // ---------------- MODE STATUS ----------------
+        Row(verticalAlignment = Alignment.CenterVertically) {
+
+            val isCase = mode.lowercase() == "case"
+            val isAmbient = mode.lowercase() == "ambient"
+
+            Box(
+                modifier = Modifier
+                    .background(
+                        color = if (isCase) Color(0xFF1976D2) else Color.LightGray,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+                    )
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = if (isCase) "CASE ACTIVE" else "CASE",
+                    color = if (isCase) Color.White else Color.DarkGray
+                )
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            Box(
+                modifier = Modifier
+                    .background(
+                        when (mode.lowercase()) {
+                            "case" -> Color(0xFF1976D2)
+                            "ambient" -> Color(0xFF7B1FA2)
+                            else -> Color.Gray
+                        },
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+                    )
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = "Mode: ${mode.uppercase()}",
+                    color = Color.White
+                )
+            }
+        }
+
         Spacer(Modifier.height(10.dp))
 
+        // ---------------- INSTRUMENT ----------------
         Text(
             text = "Instrument: ${selectedInstrument?.name ?: "None"}",
             fontSize = 20.sp
@@ -915,11 +1039,14 @@ fun AdminConsoleScreen(navController: NavHostController) {
             .filter { it.classroomCode == classroom.joinCode }
     }
 
+    var searchQuery by remember { mutableStateOf("") }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
+
     ) {
 
         // TITLE
@@ -927,6 +1054,29 @@ fun AdminConsoleScreen(navController: NavHostController) {
             text = "Admin Dashboard",
             style = MaterialTheme.typography.headlineLarge
         )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+
+            Box(modifier = Modifier.weight(1f)) {
+                StatCard(
+                    title = "Students",
+                    value = students.size.toString()
+                )
+            }
+
+            Box(modifier = Modifier.weight(1f)) {
+                StatCard(
+                    title = "Active Code",
+                    value = classroom.joinCode
+                )
+            }
+        }
+
+
+
 
         // ---------------- CLASSROOM CARD ----------------
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -956,6 +1106,13 @@ fun AdminConsoleScreen(navController: NavHostController) {
             }
         }
 
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            label = { Text("Search students") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
         // ---------------- ADD STUDENT BUTTON ----------------
         Button(
             onClick = { showDialog = true },
@@ -980,10 +1137,15 @@ fun AdminConsoleScreen(navController: NavHostController) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
+                .weight(1f, fill = true),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(students) { student ->
+            items(
+                students.filter {
+                    it.name.contains(searchQuery, ignoreCase = true) ||
+                            it.instrument.contains(searchQuery, ignoreCase = true)
+                }
+            ) { student ->
 
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
@@ -1089,6 +1251,24 @@ fun AddStudentDialog(
             }
         }
     )
+}
+
+// -------------- STAT CARD FOR ADMIN ------------------
+@Composable
+fun StatCard(title: String, value: String) {
+    Card(
+        modifier = Modifier
+            .padding(4.dp)
+            .fillMaxWidth()   // ✅ safe here
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(title, style = MaterialTheme.typography.labelMedium)
+            Text(value, style = MaterialTheme.typography.titleLarge)
+        }
+    }
 }
 
 // ----------- Graph View ------------------
@@ -1257,10 +1437,30 @@ fun GraphsScreen() {
     var mode by remember { mutableStateOf("both") }
 
     LaunchedEffect(Unit) {
-        data1m = AwsRepository.getGraphData("1m.json")
-        data1h = AwsRepository.getGraphData("1h.json")
-        data1d = AwsRepository.getGraphData("1d.json")
-        data1w = AwsRepository.getGraphData("1w.json")
+        while (true) {
+
+            val allData = AwsRepository.getAllSensorData()
+
+            val now = System.currentTimeMillis()
+
+            data1m = allData.filter {
+                now - parseTimestampToMillis(it.timestamp) <= 60_000
+            }
+
+            data1h = allData.filter {
+                now - parseTimestampToMillis(it.timestamp) <= 3_600_000
+            }
+
+            data1d = allData.filter {
+                now - parseTimestampToMillis(it.timestamp) <= 86_400_000
+            }
+
+            data1w = allData.filter {
+                now - parseTimestampToMillis(it.timestamp) <= 604_800_000
+            }
+
+            delay(5000) // refresh every 5 sec
+        }
     }
 
     Column(
@@ -1356,5 +1556,42 @@ fun ForgotPasswordScreen(navController: NavHostController) {
         ) {
             Text("Back to Login")
         }
+    }
+}
+
+// --------------------- ADMIN CONSOLE: STUDENT DETAILS ----------------------
+@Composable
+fun StudentDetailScreen(studentId: String) {
+
+    val context = LocalContext.current
+
+    val student = remember {
+        SessionStorage.loadStudents(context)
+            .firstOrNull { it.id == studentId }
+    }
+
+    var history by remember { mutableStateOf<List<SensorPoint>>(emptyList()) }
+
+    LaunchedEffect(studentId) {
+        history = AwsRepository.getStudentHistory(studentId)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+
+        Text(student?.name ?: "Unknown Student", style = MaterialTheme.typography.headlineLarge)
+
+        Spacer(Modifier.height(12.dp))
+
+        Text("Instrument: ${student?.instrument}")
+
+        Spacer(Modifier.height(20.dp))
+
+        Text("Condition History")
+
+        LineChartView(history, mode = "both")
     }
 }

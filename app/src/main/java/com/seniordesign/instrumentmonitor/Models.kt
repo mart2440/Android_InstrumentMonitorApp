@@ -1,8 +1,11 @@
 package com.seniordesign.instrumentmonitor
 
+// Data collected per JSON file from ESP32 sensor
 data class SensorData(
     val temperature: Double,
-    val humidity: Double
+    val humidity: Double,
+    val battery: Double,
+    val mode: String
 )
 
 data class InstrumentProfile(
