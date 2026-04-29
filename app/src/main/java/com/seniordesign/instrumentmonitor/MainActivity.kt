@@ -7,6 +7,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.navigation.compose.*
 import androidx.compose.ui.platform.LocalContext
 
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
+
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -23,6 +26,7 @@ class MainActivity : ComponentActivity() {
 
                 composable("signup") { SignupScreen(navController) }
                 composable("login") { LoginScreen(navController) }
+                composable("join_class") { JoinClassScreen(navController) }
 
                 composable("main") { MainScreen(navController) }
 
@@ -31,6 +35,21 @@ class MainActivity : ComponentActivity() {
                 composable("admin_login") { AdminLoginScreen(navController) }
                 composable("admin_console") { AdminConsoleScreen(navController) }
                 composable("forgot_password") { ForgotPasswordScreen(navController) }
+                composable("join_class") { JoinClassScreen(navController) }
+
+                composable(
+                    route = "student_detail/{studentId}?classCode={classCode}",
+                    arguments = listOf(
+                        navArgument("studentId")  { type = NavType.StringType },
+                        navArgument("classCode")  { type = NavType.StringType; defaultValue = "" }
+                    )
+                ) { backStackEntry ->
+                    StudentDetailScreen(
+                        studentId     = backStackEntry.arguments?.getString("studentId") ?: "",
+                        classCode     = backStackEntry.arguments?.getString("classCode") ?: "",
+                        navController = navController
+                    )
+                }
             }
         }
     }

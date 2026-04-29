@@ -101,6 +101,7 @@ object SessionStorage {
             put("id", classroom.id)
             put("name", classroom.name)
             put("joinCode", classroom.joinCode)
+            put("teacherId", classroom.teacherId) // ✅ ADD THIS
         }
 
         prefs.edit().putString("classroom", json.toString()).apply()
@@ -116,8 +117,10 @@ object SessionStorage {
             Classroom(
                 id = obj.optString("id", ""),
                 name = obj.optString("name", "Music Class"),
-                joinCode = obj.optString("joinCode", generateJoinCode())
+                joinCode = obj.optString("joinCode", generateJoinCode()),
+                teacherId = obj.optString("teacherId", "")
             )
+
         } catch (e: Exception) {
             prefs.edit().remove("classroom").apply()
             null

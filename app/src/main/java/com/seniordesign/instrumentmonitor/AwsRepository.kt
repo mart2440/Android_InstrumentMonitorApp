@@ -7,11 +7,17 @@ import okhttp3.Request
 import org.json.JSONArray
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import kotlin.code
+import kotlin.text.toFloat
 
 
 object AwsRepository {
 
     private val client = OkHttpClient()
+
 
     // Function for Sensor Data (mock/local)
     fun getSensorData(): SensorData {
@@ -38,6 +44,9 @@ object AwsRepository {
 
                 val request = Request.Builder().url(url).build()
                 val response = client.newCall(request).execute()
+
+                Log.d("JOIN_CLASS", "Response: ${response.code}")
+                Log.d("JOIN_CLASS", response.body?.string() ?: "empty")
 
                 Log.d("AWS", "Response code: ${response.code}")
 
@@ -132,41 +141,190 @@ object AwsRepository {
     // -------------- ADMIN CONSOLE: STUDENT CONDITION HISTORY ------------------
     suspend fun getStudentHistory(studentId: String): List<SensorPoint> =
         withContext(Dispatchers.IO) {
-
             return@withContext try {
-
-                val result = mutableListOf<SensorPoint>()
-
+                // Path: sensors/students/{studentId}.json
+                // Your ESP32 should write to this path per student
                 val url =
-                    "https://senior-design-sensor-data.s3.us-east-2.amazonaws.com/sensors/real/"
+                    "https://senior-design-sensor-data.s3.us-east-2.amazonaws.com/sensors/students/$studentId.json"
 
-                // ⚠️ BEST PRACTICE WOULD BE INDEX FILE OR DB
-                // For now we simulate by fetching latest only
-
-                val request = Request.Builder()
-                    .url("${url}latest.json")
-                    .build()
-
+                val request = Request.Builder().url(url).build()
                 val response = client.newCall(request).execute()
+
+                if (!response.isSuccessful) return@withContext emptyList()
 
                 val json = response.body?.string() ?: return@withContext emptyList()
 
-                val obj = org.json.JSONObject(json)
-
-                result.add(
-                    SensorPoint(
-                        timestamp = obj.optString("timestamp"),
-                        temperature = obj.optDouble("temp", 0.0).toFloat(),
-                        humidity = obj.optDouble("hum", 0.0).toFloat()
+                // Handles both a JSON array of points OR a single object
+                return@withContext try {
+                    val array = JSONArray(json)
+                    val list = mutableListOf<SensorPoint>()
+                    for (i in 0 until array.length()) {
+                        val obj = array.getJSONObject(i)
+                        list.add(
+                            SensorPoint(
+                                timestamp = obj.optString("timestamp"),
+                                temperature = obj.optDouble("temp", 0.0).toFloat(),
+                                humidity    = obj.optDouble("hum",  0.0).toFloat()
+                            )
+                        )
+                    }
+                    list
+                } catch (e: Exception) {
+                    // Single-object fallback (matches your current latest.json shape)
+                    val obj = JSONObject(json)
+                    listOf(
+                        SensorPoint(
+                            timestamp   = obj.optString("timestamp"),
+                            temperature = obj.optDouble("temp", 0.0).toFloat(),
+                            humidity    = obj.optDouble("hum",  0.0).toFloat()
+                        )
                     )
-                )
+                }
 
-                result
+            } catch (e: Exception) {
+                Log.e("AWS", "getStudentHistory failed for $studentId", e)
+                emptyList()
+            }
+        }
+
+    suspend fun getStudentsByClass(classId: String): List<Student> {
+        return withContext(Dispatchers.IO) {
+            try {
+
+                val url =
+                    "https://5og4l4qmyl.execute-api.us-east-2.amazonaws.com/dev/getStudentsByClass"
+
+                val jsonBody = """{"classCode":"$classId"}"""
+
+                val requestBody =
+                    jsonBody.toRequestBody("application/json".toMediaType())
+
+                val request = okhttp3.Request.Builder()
+                    .url(url)
+                    .post(requestBody)
+                    .build()
+
+                val response = client.newCall(request).execute()
+                val jsonString = response.body?.string() ?: return@withContext emptyList()
+
+                val array = org.json.JSONArray(jsonString)
+
+                val list = mutableListOf<Student>()
+
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+
+                    list.add(
+                        Student(
+                            id = obj.optString("studentId"),
+                            name = obj.optString("name"),
+                            instrument = obj.optString("instrument"),
+                            classroomCode = obj.optString("classCode")
+                        )
+                    )
+                }
+
+                list
 
             } catch (e: Exception) {
                 emptyList()
             }
         }
+    }
+
+    // Create class for student
+    suspend fun createClass(): String {
+        return withContext(Dispatchers.IO) {
+
+            val url =
+                "https://5og4l4qmyl.execute-api.us-east-2.amazonaws.com/dev/createClass"
+
+            val jsonBody = """
+        {
+            "teacherId": "${SessionManager.currentUser?.email ?: "unknown"}"
+        }
+        """.trimIndent()
+
+            val requestBody =
+                jsonBody.toRequestBody("application/json".toMediaType())
+
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
+
+            val response = client.newCall(request).execute()
+            val bodyString = response.body?.string()
+
+            if (!response.isSuccessful) {
+                throw Exception("HTTP error: ${response.code}")
+            }
+
+            if (bodyString.isNullOrBlank()) {
+                throw Exception("Empty response from AWS")
+            }
+
+            val outer = org.json.JSONObject(bodyString)
+
+            // CASE 1: API Gateway proxy format
+            val innerString = if (outer.has("body")) {
+                outer.getString("body")
+            } else {
+                bodyString
+            }
+
+            val inner = org.json.JSONObject(innerString)
+
+            if (!inner.has("classId")) {
+                throw Exception("Missing classId in response: $inner")
+            }
+
+            return@withContext inner.getString("classId")
+        }
+    }
+
+    // API call to add student
+    suspend fun joinClass(student: Student) {
+        withContext(Dispatchers.IO) {
+            val url = "https://5og4l4qmyl.execute-api.us-east-2.amazonaws.com/dev/joinClass"
+
+            // ✅ Log all fields so we can see exactly what's being sent
+            Log.d("JOIN_CLASS", "studentId:    ${student.id}")
+            Log.d("JOIN_CLASS", "name:         ${student.name}")
+            Log.d("JOIN_CLASS", "instrument:   ${student.instrument}")
+            Log.d("JOIN_CLASS", "classroomCode:${student.classroomCode}")
+
+            if (student.classroomCode.isBlank()) {
+                throw Exception("classroomCode is blank — student will not be findable by class")
+            }
+
+            val jsonBody = JSONObject().apply {
+                put("studentId",  student.id)
+                put("name",       student.name)
+                put("instrument", student.instrument)
+                put("classCode",  student.classroomCode)
+            }.toString()
+
+            Log.d("JOIN_CLASS", "JSON body: $jsonBody")
+
+            val requestBody = jsonBody.toRequestBody("application/json".toMediaType())
+
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
+
+            val response = client.newCall(request).execute()
+            val responseBody = response.body?.string() ?: "null"
+
+            Log.d("JOIN_CLASS", "Response code: ${response.code}")
+            Log.d("JOIN_CLASS", "Response body: $responseBody")
+
+            if (!response.isSuccessful) {
+                throw Exception("Join failed: ${response.code} — $responseBody")
+            }
+        }
+    }
 
     suspend fun getLatestSensorData(): SensorData =
         withContext(Dispatchers.IO) {
@@ -210,4 +368,28 @@ object AwsRepository {
                 SensorData(0.0, 0.0, 0.0, "unknown")
             }
         }
+
+    // Remove a student from the class roster
+    suspend fun removeStudent(studentId: String, classCode: String) {
+        withContext(Dispatchers.IO) {
+            val url = "https://5og4l4qmyl.execute-api.us-east-2.amazonaws.com/dev/removeStudent"
+
+            val jsonBody = """{"studentId":"$studentId","classCode":"$classCode"}"""
+
+            val requestBody = jsonBody.toRequestBody("application/json".toMediaType())
+
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
+
+            val response = client.newCall(request).execute()
+
+            if (!response.isSuccessful) {
+                throw Exception("Remove failed: ${response.code}")
+            }
+        }
+    }
 }
+
+

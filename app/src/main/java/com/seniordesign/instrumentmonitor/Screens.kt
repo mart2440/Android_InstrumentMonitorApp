@@ -46,6 +46,16 @@ import java.util.UUID
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import android.util.Log
+import androidx.compose.material.icons.filled.Close
+
+// Imports for Notifications
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 
 // ---------------- SESSION ----------------
 
@@ -450,6 +460,7 @@ fun MainScreen(navController: NavHostController) {
 fun CurrentStatusScreen() {
 
     val user = SessionManager.currentUser
+    val context = LocalContext.current
 
     var temp by remember { mutableStateOf(0.0) }
     var humidity by remember { mutableStateOf(0.0) }
@@ -511,6 +522,10 @@ fun CurrentStatusScreen() {
                     temp in instrument.minTemp..instrument.maxTemp &&
                             humidity in instrument.minHumidity..instrument.maxHumidity
                 } ?: false
+
+                if (!isSafe && selectedInstrument != null) {
+                    sendSafetyNotification(context, temp, humidity)
+                }
 
                 instrumentRequired = selectedInstrument == null
 
@@ -833,6 +848,20 @@ fun SettingsScreen(navController: NavHostController) {
                 )
             }
 
+            // --------------- JOIN CLASS ----------------
+            item {
+                SettingsSectionHeader("Join Class")
+            }
+
+            item {
+                Button(
+                    onClick = { navController.navigate("join_class") },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Join a Class")
+                }
+            }
+
             // ---------------- APPEARANCE ----------------
             item {
                 SettingsSectionHeader("Appearance")
@@ -1013,163 +1042,182 @@ fun InstrumentDropdown(
 fun AdminConsoleScreen(navController: NavHostController) {
 
     val context = LocalContext.current
+    val scope   = rememberCoroutineScope()
 
     var classroom by remember {
         mutableStateOf(
             SessionStorage.loadClassroom(context) ?: Classroom(
-                id = System.currentTimeMillis().toString(),
-                name = "Music Class",
-                joinCode = SessionStorage.generateJoinCode()
+                id        = System.currentTimeMillis().toString(),
+                name      = "Music Class",
+                teacherId = SessionManager.currentUser?.email ?: "unknown",
+                joinCode  = "TEMP"
             )
         )
     }
 
-    var students by remember {
-        mutableStateOf(
-            SessionStorage.loadStudents(context)
-                .filter { it.classroomCode == classroom.joinCode }
-        )
-    }
-
-    var showDialog by remember { mutableStateOf(false) }
-
-    // reload students when classroom changes
-    LaunchedEffect(classroom.joinCode) {
-        students = SessionStorage.loadStudents(context)
-            .filter { it.classroomCode == classroom.joinCode }
-    }
-
+    var students    by remember { mutableStateOf<List<Student>>(emptyList()) }
+    var isLoading   by remember { mutableStateOf(true) }
+    var showDialog  by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    var errorMsg    by remember { mutableStateOf<String?>(null) }
+
+    // Auto-refresh roster every 5 seconds
+    LaunchedEffect(classroom.joinCode) {
+        while (true) {
+            isLoading = true
+            try {
+                students = AwsRepository.getStudentsByClass(classroom.joinCode)
+            } catch (e: Exception) {
+                errorMsg = "Failed to load students"
+            }
+            isLoading = false
+            delay(5000)
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
 
-        // TITLE
-        Text(
-            text = "Admin Dashboard",
-            style = MaterialTheme.typography.headlineLarge
-        )
+        // ── Title ──────────────────────────────────────────
+        Text("Admin Dashboard", style = MaterialTheme.typography.headlineLarge)
 
+        // ── Stat row ───────────────────────────────────────
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-
             Box(modifier = Modifier.weight(1f)) {
-                StatCard(
-                    title = "Students",
-                    value = students.size.toString()
-                )
+                StatCard(title = "Students", value = "${students.size} / 10+")
             }
-
             Box(modifier = Modifier.weight(1f)) {
-                StatCard(
-                    title = "Active Code",
-                    value = classroom.joinCode
-                )
+                StatCard(title = "Class Code", value = classroom.joinCode)
             }
         }
 
+        // ── Capacity badge ─────────────────────────────────
+        val capacityColor = if (students.size >= 10)
+            Color(0xFF4CAF50) else Color(0xFFFFC107)
 
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color    = capacityColor,
+            shape    = MaterialTheme.shapes.small
+        ) {
+            Text(
+                text     = if (students.size >= 10)
+                    "✓ Classroom capacity met (${students.size} students)"
+                else
+                    "Roster: ${students.size} / 10 minimum students",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                color    = Color.White,
+                style    = MaterialTheme.typography.labelLarge
+            )
+        }
 
-
-        // ---------------- CLASSROOM CARD ----------------
+        // ── Classroom code card ────────────────────────────
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
-
                 Text("Classroom Code", style = MaterialTheme.typography.titleMedium)
-
-                Spacer(Modifier.height(8.dp))
-
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    text = classroom.joinCode,
+                    text  = classroom.joinCode,
                     style = MaterialTheme.typography.headlineMedium
                 )
-
                 Spacer(Modifier.height(8.dp))
-
-                Button(
-                    onClick = {
-                        val newCode = SessionStorage.generateJoinCode()
-                        classroom = classroom.copy(joinCode = newCode)
-                        SessionStorage.saveClassroom(context, classroom)
-                        students = emptyList()
+                Button(onClick = {
+                    scope.launch {
+                        try {
+                            val newCode = AwsRepository.createClass()
+                            classroom = classroom.copy(joinCode = newCode)
+                            SessionStorage.saveClassroom(context, classroom)
+                            students = emptyList()
+                        } catch (e: Exception) {
+                            errorMsg = "Failed to create class: ${e.message}"
+                        }
                     }
-                ) {
+                }) {
                     Text("Generate New Code")
                 }
             }
         }
 
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            label = { Text("Search students") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // ---------------- ADD STUDENT BUTTON ----------------
-        Button(
-            onClick = { showDialog = true },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Add Student")
+        // ── Error banner ───────────────────────────────────
+        if (errorMsg != null) {
+            Text(
+                text  = errorMsg!!,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
         }
 
-        // ---------------- OVERVIEW CARD ----------------
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-
-                Text("Overview", style = MaterialTheme.typography.titleMedium)
-
-                Spacer(Modifier.height(8.dp))
-
-                Text("Students: ${students.size}")
+        // ── Search + Add row ───────────────────────────────
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value         = searchQuery,
+                onValueChange = { searchQuery = it },
+                label         = { Text("Search students") },
+                modifier      = Modifier.weight(1f),
+                singleLine    = true
+            )
+            Button(onClick = { showDialog = true }) {
+                Text("Add")
             }
         }
 
-        // ---------------- STUDENT LIST ----------------
+        // ── Loading indicator ──────────────────────────────
+        if (isLoading) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
+        // ── Student roster ─────────────────────────────────
+        val filtered = students.filter {
+            it.name.contains(searchQuery, ignoreCase = true) ||
+                    it.instrument.contains(searchQuery, ignoreCase = true)
+        }
+
         LazyColumn(
-            modifier = Modifier
+            modifier              = Modifier
                 .fillMaxWidth()
-                .weight(1f, fill = true),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .weight(1f),
+            verticalArrangement   = Arrangement.spacedBy(8.dp)
         ) {
-            items(
-                students.filter {
-                    it.name.contains(searchQuery, ignoreCase = true) ||
-                            it.instrument.contains(searchQuery, ignoreCase = true)
-                }
-            ) { student ->
-
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-
-                        Text(student.name, style = MaterialTheme.typography.titleMedium)
-
-                        Text("Instrument: ${student.instrument}")
-
-                        Text(
-                            text = "ID: ${student.id.take(6)}",
-                            style = MaterialTheme.typography.labelSmall
+            items(filtered, key = { it.id }) { student ->
+                StudentRosterCard(
+                    student   = student,
+                    onTap     = {
+                        // Navigate to detail screen — passes studentId + classCode
+                        navController.navigate(
+                            "student_detail/${student.id}?classCode=${classroom.joinCode}"
                         )
+                    },
+                    onRemove  = {
+                        scope.launch {
+                            try {
+                                AwsRepository.removeStudent(student.id, classroom.joinCode)
+                                students = students.filter { it.id != student.id }
+                                SessionStorage.saveStudents(context, students)
+                            } catch (e: Exception) {
+                                errorMsg = "Could not remove ${student.name}"
+                            }
+                        }
                     }
-                }
+                )
             }
         }
 
-        // ---------------- EXIT ----------------
-        Button(
-            onClick = {
+        // ── Exit ───────────────────────────────────────────
+        OutlinedButton(
+            onClick  = {
                 SessionManager.currentUser = null
-                navController.navigate("start") {
-                    popUpTo(0)
-                }
+                navController.navigate("start") { popUpTo(0) }
             },
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1177,19 +1225,21 @@ fun AdminConsoleScreen(navController: NavHostController) {
         }
     }
 
-    // ---------------- ADD STUDENT DIALOG ----------------
+    // ── Add student dialog ─────────────────────────────────
     if (showDialog) {
         AddStudentDialog(
             onDismiss = { showDialog = false },
-            onAdd = { student ->
-
-                val newStudent = student.copy(
-                    classroomCode = classroom.joinCode
-                )
-
-                students = students + newStudent
-                SessionStorage.saveStudents(context, students)
-
+            onAdd     = { student ->
+                val newStudent = student.copy(classroomCode = classroom.joinCode)
+                scope.launch {
+                    try {
+                        AwsRepository.joinClass(newStudent)
+                        students = students + newStudent
+                        SessionStorage.saveStudents(context, students)
+                    } catch (e: Exception) {
+                        errorMsg = "Failed to add student"
+                    }
+                }
                 showDialog = false
             }
         )
@@ -1251,6 +1301,79 @@ fun AddStudentDialog(
             }
         }
     )
+}
+
+// ── Tappable student card with remove button ───────────────
+@Composable
+fun StudentRosterCard(
+    student  : Student,
+    onTap    : () -> Unit,
+    onRemove : () -> Unit
+) {
+    var showConfirm by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick  = onTap
+    ) {
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(student.name, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Instrument: ${student.instrument}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    "ID: ${student.id.take(8)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Tap hint
+            Text(
+                "View →",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Spacer(Modifier.width(8.dp))
+
+            // Remove button
+            IconButton(onClick = { showConfirm = true }) {
+                Icon(
+                    imageVector        = Icons.Default.Close,
+                    contentDescription = "Remove student",
+                    tint               = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    }
+
+    // Confirm before deleting
+    if (showConfirm) {
+        AlertDialog(
+            onDismissRequest = { showConfirm = false },
+            title            = { Text("Remove student?") },
+            text             = { Text("Remove ${student.name} from this class?") },
+            confirmButton    = {
+                Button(
+                    onClick = { showConfirm = false; onRemove() },
+                    colors  = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) { Text("Remove") }
+            },
+            dismissButton    = {
+                OutlinedButton(onClick = { showConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
 }
 
 // -------------- STAT CARD FOR ADMIN ------------------
@@ -1436,6 +1559,7 @@ fun GraphsScreen() {
 
     var mode by remember { mutableStateOf("both") }
 
+
     LaunchedEffect(Unit) {
         while (true) {
 
@@ -1561,37 +1685,246 @@ fun ForgotPasswordScreen(navController: NavHostController) {
 
 // --------------------- ADMIN CONSOLE: STUDENT DETAILS ----------------------
 @Composable
-fun StudentDetailScreen(studentId: String) {
-
-    val context = LocalContext.current
-
-    val student = remember {
-        SessionStorage.loadStudents(context)
-            .firstOrNull { it.id == studentId }
-    }
-
+fun StudentDetailScreen(
+    studentId : String,
+    classCode : String,
+    navController: NavHostController
+) {
+    var student by remember { mutableStateOf<Student?>(null) }
     var history by remember { mutableStateOf<List<SensorPoint>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
 
     LaunchedEffect(studentId) {
-        history = AwsRepository.getStudentHistory(studentId)
+        // Look up student from the real class roster
+        val roster = AwsRepository.getStudentsByClass(classCode)
+        student   = roster.firstOrNull { it.id == studentId }
+
+        // Load their sensor history from S3
+        history   = AwsRepository.getStudentHistory(studentId)
+        isLoading = false
     }
 
     Column(
-        modifier = Modifier
+        modifier            = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
 
-        Text(student?.name ?: "Unknown Student", style = MaterialTheme.typography.headlineLarge)
+        // ── Back button ────────────────────────────────────
+        TextButton(onClick = { navController.popBackStack() }) {
+            Text("← Back to Dashboard")
+        }
+
+        if (isLoading) {
+            CircularProgressIndicator()
+            return@Column
+        }
+
+        val s = student
+
+        if (s == null) {
+            Text("Student not found.", color = MaterialTheme.colorScheme.error)
+            return@Column
+        }
+
+        // ── Student header ─────────────────────────────────
+        Text(s.name, style = MaterialTheme.typography.headlineMedium)
+        Text(
+            "Class: $classCode",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Divider()
+
+        // ── Instrument details card ────────────────────────
+        // Looks up the preset safe-range profile for their instrument
+        val profile = PresetData.instruments.firstOrNull {
+            it.name.equals(s.instrument, ignoreCase = true)
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+
+                Text("Instrument Details", style = MaterialTheme.typography.titleMedium)
+
+                Text("Instrument: ${s.instrument}", style = MaterialTheme.typography.bodyLarge)
+
+                if (profile != null) {
+                    Divider()
+                    Text("Safe Temperature: ${profile.minTemp}°F – ${profile.maxTemp}°F")
+                    Text("Safe Humidity:    ${profile.minHumidity}% – ${profile.maxHumidity}%")
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Care Tips",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(profile.careTips, style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text(
+                        "No preset profile found for ${s.instrument}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        Divider()
+
+        // ── Sensor history chart ───────────────────────────
+        Text("Condition History", style = MaterialTheme.typography.titleMedium)
+
+        if (history.isEmpty()) {
+            Text(
+                "No sensor history available yet for this student.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            LineChartView(data = history, mode = "both")
+        }
+    }
+}
+
+// ----------------- STUDENT JOIN CLASS SCREEN --------------------------------
+@Composable
+fun JoinClassScreen(navController: NavHostController) {
+
+    val context = LocalContext.current
+    val scope   = rememberCoroutineScope()
+
+    var joinCode   by remember { mutableStateOf("") }
+    var name       by remember { mutableStateOf("") }
+    var instrument by remember { mutableStateOf("Violin") }
+    var error      by remember { mutableStateOf<String?>(null) }
+    var isLoading  by remember { mutableStateOf(false) }
+
+    Column(
+        modifier            = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+
+        Text("Join Class", style = MaterialTheme.typography.headlineLarge)
+
+        Spacer(Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value         = joinCode,
+            onValueChange = { joinCode = it.uppercase().trim() }, // normalize code
+            label         = { Text("Class Code") },
+            modifier      = Modifier.fillMaxWidth(),
+            singleLine    = true
+        )
 
         Spacer(Modifier.height(12.dp))
 
-        Text("Instrument: ${student?.instrument}")
+        OutlinedTextField(
+            value         = name,
+            onValueChange = { name = it },
+            label         = { Text("Your Name") },
+            modifier      = Modifier.fillMaxWidth(),
+            singleLine    = true
+        )
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
 
-        Text("Condition History")
+        Text("Instrument: $instrument")
 
-        LineChartView(history, mode = "both")
+        InstrumentDropdown { selected -> instrument = selected.name }
+
+        Spacer(Modifier.height(16.dp))
+
+        if (error != null) {
+            Text(error!!, color = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.height(8.dp))
+        }
+
+        Button(
+            onClick = {
+                Log.d("JOIN_CLASS", "joinCode value = '$joinCode'")
+                Log.d("JOIN_CLASS", "name value = '$name'")
+
+                if (joinCode.isBlank() || name.isBlank()) {
+                    error = "Please enter your name and class code"
+                    return@Button
+                }
+
+                val student = Student(
+                    id            = UUID.randomUUID().toString(),
+                    name          = name,
+                    instrument    = instrument,
+                    classroomCode = joinCode
+                )
+
+                isLoading = true
+                error     = null
+
+                scope.launch {
+                    try {
+                        // ✅ WAIT for AWS to confirm before doing anything else
+                        AwsRepository.joinClass(student)
+
+                        // Update session after confirmed write
+                        SessionManager.currentUser = SessionManager.currentUser?.copy(
+                            firstName  = name,
+                            instrument = instrument
+                        )
+
+                        // Now safe to navigate
+                        navController.navigate("main") {
+                            popUpTo("join_class") { inclusive = true }
+                        }
+
+                    } catch (e: Exception) {
+                        // Show the real error instead of silently failing
+                        error     = "Failed to join class: ${e.message}"
+                        isLoading = false
+                    }
+                }
+            },
+            enabled  = !isLoading,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color    = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Joining...")
+            } else {
+                Text("Join")
+            }
+        }
     }
 }
+
+// ------------------------ APP NOTIFICATIONS -------------------
+// Add this function anywhere in Screens.kt
+fun sendSafetyNotification(context: Context, temp: Double, humidity: Double) {
+    val channelId = "instrument_safety"
+    val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+    val channel = NotificationChannel(
+        channelId,
+        "Instrument Safety Alerts",
+        NotificationManager.IMPORTANCE_HIGH
+    ).apply { description = "Alerts when conditions are unsafe for instruments" }
+    manager.createNotificationChannel(channel)
+
+    val notification = NotificationCompat.Builder(context, channelId)
+        .setSmallIcon(android.R.drawable.ic_dialog_alert)
+        .setContentTitle("Unsafe Instrument Conditions!")
+        .setContentText("Temp: ${"%.1f".format(temp)}°F  Humidity: ${"%.1f".format(humidity)}%")
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setAutoCancel(true)
+        .build()
+
+    NotificationManagerCompat.from(context).notify(1001, notification)
+}
+
