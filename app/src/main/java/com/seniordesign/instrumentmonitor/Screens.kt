@@ -1559,31 +1559,50 @@ fun GraphsScreen() {
 
     var mode by remember { mutableStateOf("both") }
 
-
+    val liveBuffer = remember { mutableStateListOf<SensorPoint>() }
     LaunchedEffect(Unit) {
         while (true) {
 
-            val allData = AwsRepository.getAllSensorData()
+            val latest = AwsRepository.getLatestSensorData()
+
+            val timestamp = System.currentTimeMillis()
+
+            val newPoint = SensorPoint(
+                timestamp = Instant.ofEpochMilli(timestamp).toString(), // ISO format
+                temperature = latest.temperature.toFloat(),
+                humidity = latest.humidity.toFloat()
+            )
+
+            // ✅ Add to buffer
+            liveBuffer.add(newPoint)
+
+            // Keep only last 7 days (prevents memory blowup)
+            val cutoff = System.currentTimeMillis() - 604_800_000
+
+            liveBuffer.removeAll {
+                parseTimestampToMillis(it.timestamp) < cutoff
+            }
 
             val now = System.currentTimeMillis()
 
-            data1m = allData.filter {
+            // Use buffer instead of getAllSensorData()
+            data1m = liveBuffer.filter {
                 now - parseTimestampToMillis(it.timestamp) <= 60_000
             }
 
-            data1h = allData.filter {
+            data1h = liveBuffer.filter {
                 now - parseTimestampToMillis(it.timestamp) <= 3_600_000
             }
 
-            data1d = allData.filter {
+            data1d = liveBuffer.filter {
                 now - parseTimestampToMillis(it.timestamp) <= 86_400_000
             }
 
-            data1w = allData.filter {
+            data1w = liveBuffer.filter {
                 now - parseTimestampToMillis(it.timestamp) <= 604_800_000
             }
 
-            delay(5000) // refresh every 5 sec
+            delay(3000) // match CurrentStatus
         }
     }
 

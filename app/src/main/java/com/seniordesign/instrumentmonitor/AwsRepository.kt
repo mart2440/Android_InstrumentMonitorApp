@@ -354,11 +354,18 @@ object AwsRepository {
 
                 Log.d("AWS", "Parsed → temp: $temp, humidity: $hum")
 
+                val modeValue = when {
+                    obj.has("mode") -> obj.optString("mode")
+                    obj.has("loc") -> obj.optString("loc")
+                    obj.has("location") -> obj.optString("location")
+                    else -> "unknown"
+                }
+
                 SensorData(
                     temperature = obj.optDouble("temp", 0.0),
                     humidity = obj.optDouble("hum", 0.0),
                     battery = obj.optDouble("batt", 0.0),
-                    mode = obj.optString("location", "unknown")
+                    mode = modeValue
                 )
 
             } catch (e: Exception) {
